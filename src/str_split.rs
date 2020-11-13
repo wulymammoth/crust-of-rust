@@ -27,21 +27,20 @@ impl<'a> Iterator for StrSplit<'a> {
         // - we want a mutable reference to the value inside remainder because we want to modify
         // the existing value
         // - take a reference to as opposed to `Some(&mut remainder)`
-        if let Some(ref mut remainder) = self.remainder {
-            if let Some(next_delimiter) = remainder.find(self.delimiter) {
-                let head = &remainder[..next_delimiter];
-                // NOTE: why do we need the deref operator here?
-                // - not of the same type
-                // - LHS type: &mut &'a str
-                // - RHS type: &'a str
-                // * want to assign into where `remainder` is pointing
-                *remainder = &remainder[(next_delimiter + self.delimiter.len())..];
-                Some(head)
-            } else {
-                self.remainder.take() // "takes" the value of the option leaving `None` in its place
-            }
+        // - we need `as_mut()` here because we want to access self (remainder) not a new pointer
+        // to the Option<T> of a copy of the remainder (otherwise it hangs)
+        let remainder = self.remainder.as_mut()?;
+        if let Some(next_delimiter) = remainder.find(self.delimiter) {
+            let head = &remainder[..next_delimiter];
+            // NOTE: why do we need the deref operator here?
+            // - not of the same type
+            // - LHS type: &mut &'a str
+            // - RHS type: &'a str
+            // * want to assign into where `remainder` is pointing
+            *remainder = &remainder[(next_delimiter + self.delimiter.len())..];
+            Some(head)
         } else {
-            None
+            self.remainder.take() // "takes" the value of the option leaving `None` in its place
         }
     }
 }
