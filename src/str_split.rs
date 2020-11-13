@@ -1,14 +1,15 @@
 #[derive(Debug)]
-pub struct StrSplit<'haystack, 'delimiter> {
+pub struct StrSplit<'haystack, D> {
     remainder: Option<&'haystack str>,
-    delimiter: &'delimiter str, // NOTE: if we use a String here instead, it is expensive and requires an allocator (cannot go embedded as it may not have an allocator)
+    delimiter: D, // NOTE: if we use a String here instead, it is expensive and requires an allocator (cannot go embedded as it may not have an allocator)
 }
 
 // NOTE: anonymous lifetimes
 // - where we tell the compiler to guess the lifetime and only works when
 // - there is one possible guess; type-inference for lifetimes (elision)
-impl<'haystack, 'delimiter> StrSplit<'haystack, 'delimiter> {
-    pub fn new(haystack: &'haystack str, delimiter: &'delimiter str) -> Self {
+#[allow(dead_code)]
+impl<'haystack, D> StrSplit<'haystack, D> {
+    pub fn new(haystack: &'haystack str, delimiter: D) -> Self {
         Self {
             remainder: Some(haystack),
             delimiter,
@@ -16,12 +17,19 @@ impl<'haystack, 'delimiter> StrSplit<'haystack, 'delimiter> {
     }
 }
 
+pub trait Delimiter {
+    fn find_next(&self, s: &str) -> Option<(usize, usize)>;
+}
+
 // why is the lifetime specifier needed next to `impl`?
 // - makes the impl generic over a lifetime
 // - it's a specifier for the implementation and not the type (like generics)
 // - anon lifetime elision to match the `StrSplit` args, but we don't care about that second
 // lifetime
-impl<'haystack> Iterator for StrSplit<'haystack, '_> {
+impl<'haystack, D> Iterator for StrSplit<'haystack, D>
+where
+    D: Delimiter,
+{
     // we can use the anon lifetime here, because it isn't needed
     type Item = &'haystack str;
 
@@ -33,14 +41,16 @@ impl<'haystack> Iterator for StrSplit<'haystack, '_> {
         // - we need `as_mut()` here because we want to access self (remainder) not a new pointer
         // to the Option<T> of a copy of the remainder (otherwise it hangs)
         let remainder = self.remainder.as_mut()?;
-        if let Some(next_delimiter) = remainder.find(self.delimiter) {
-            let head = &remainder[..next_delimiter];
+        if let Some((next_delimiter_start, _next_delimiter_end)) =
+            self.delimiter.find_next(remainder)
+        {
+            let head = &remainder[..next_delimiter_start];
             // NOTE: why do we need the deref operator here?
             // - not of the same type
             // - LHS type: &mut &'haystack str
             // - RHS type: &'haystack str
             // * want to assign into where `remainder` is pointing
-            *remainder = &remainder[(next_delimiter + self.delimiter.len())..];
+            *remainder = &remainder[_next_delimiter_end..];
             Some(head)
         } else {
             self.remainder.take() // "takes" the value of the option leaving `None` in its place
@@ -48,9 +58,23 @@ impl<'haystack> Iterator for StrSplit<'haystack, '_> {
     }
 }
 
+impl Delimiter for &str {
+    fn find_next(&self, s: &str) -> Option<(usize, usize)> {
+        s.find(self).map(|start| (start, start + self.len()))
+    }
+}
+
+impl Delimiter for char {
+    fn find_next(&self, s: &str) -> Option<(usize, usize)> {
+        s.char_indices()
+            .find(|(_, c)| c == self)
+            .map(|(start, _)| (start, start + 1))
+    }
+}
+
+#[allow(dead_code)]
 fn until_char(s: &str, c: char) -> &str {
-    let delimiter = format!("{}", c);
-    StrSplit::new(s, &delimiter)
+    StrSplit::new(s, c)
         .next()
         .expect("StrSplit always gives at least one result")
 }
