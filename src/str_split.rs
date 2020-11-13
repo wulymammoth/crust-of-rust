@@ -1,6 +1,6 @@
 #[derive(Debug)]
 pub struct StrSplit<'a> {
-    remainder: &'a str,
+    remainder: Option<&'a str>,
     delimiter: &'a str,
 }
 
@@ -10,7 +10,7 @@ pub struct StrSplit<'a> {
 impl<'a> StrSplit<'a> {
     pub fn new(haystack: &'a str, delimiter: &'a str) -> Self {
         Self {
-            remainder: haystack,
+            remainder: Some(haystack),
             delimiter,
         }
     }
@@ -23,23 +23,25 @@ impl<'a> Iterator for StrSplit<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(next_delimiter) = self.remainder.find(self.delimiter) {
-            let head = &self.remainder[..next_delimiter];
-            self.remainder = &self.remainder[(next_delimiter + self.delimiter.len())..];
-            Some(head)
-        } else if self.remainder.is_empty() {
-            // TODO: bug
-            None
+        // NOTE: if `ref` isn't used, then remainder's value is moved
+        // - we want a mutable reference to the value inside remainder because we want to modify
+        // the existing value
+        // - take a reference to as opposed to `Some(&mut remainder)`
+        if let Some(ref mut remainder) = self.remainder {
+            if let Some(next_delimiter) = remainder.find(self.delimiter) {
+                let head = &remainder[..next_delimiter];
+                // NOTE: why do we need the deref operator here?
+                // - not of the same type
+                // - LHS type: &mut &'a str
+                // - RHS type: &'a str
+                // * want to assign into where `remainder` is pointing
+                *remainder = &remainder[(next_delimiter + self.delimiter.len())..];
+                Some(head)
+            } else {
+                self.remainder.take() // "takes" the value of the option leaving `None` in its place
+            }
         } else {
-            let tail = self.remainder;
-            // NOTE: why is assigning a string literal to remainder okay here?
-            // - `remainder` is &'a str
-            // - "" is &'static str
-            // * can assign to `remainder` as long as what's being assigned has these invariants
-            //   1. same type
-            //   2. greater than or equal lifetime
-            self.remainder = "";
-            Some(tail)
+            None
         }
     }
 }
@@ -49,4 +51,12 @@ fn it_works() {
     let haystack = "a b c d e";
     let letters: Vec<_> = StrSplit::new(haystack, " ").collect();
     assert_eq!(letters, vec!["a", "b", "c", "d", "e"]);
+}
+
+#[test]
+fn tail() {
+    // NOTE: is the element empty or an element we haven't yet yielded?
+    let haystack = "a b c d ";
+    let letters: Vec<_> = StrSplit::new(haystack, " ").collect();
+    assert_eq!(letters, vec!["a", "b", "c", "d", ""]);
 }
